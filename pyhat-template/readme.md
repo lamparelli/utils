@@ -5,7 +5,6 @@ Info here: https://github.com/PyHAT-stack/awesome-python-htmx
 
 1) H: HTMX
 
-
 The need for javascript is reduced by using HTMX.
 An example can be seen in /templates/index.html:
 - the form uses an HTMX submit action ("hx-post") that points to the python /add endpoint (instead of pointing to a JS function)
