@@ -237,3 +237,15 @@ def split_pages_horizontally(pdf_path: str | Path, inplace: bool) -> Path:
         os.rename(out_path, pdf_path)
 
     return out_path
+
+def read_pdf_text(pdf_path: Path):
+    # !pip install pypdf
+    import pypdf
+
+    path = Path(pdf_path)
+    pdf = pypdf.PdfReader(path)
+
+    print(f"Reading contents of PDF {path}")
+    for idx, page in enumerate(pdf.pages):
+        print(f"--- PAGE {idx} ---")
+        print(page.extract_text())
