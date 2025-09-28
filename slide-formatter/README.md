@@ -25,5 +25,5 @@ pip install -r requirements.txt
 3) Run program
 ```
 .\venv\Scripts\activate
-python process_slides.py --folder C:\Users\my_user\path_to_folder --inplace 1 --write 1 --no_watermark 1 --split 1
+python process_slides.py --folder C:\Users\my_user\path_to_folder --inplace 0 --write 1 --no_watermark 1 --split_pages 1
 ```
