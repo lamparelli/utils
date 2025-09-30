@@ -58,6 +58,23 @@ def remove_watermarks_with_pikepdf(pdf_path: Path, inplace: bool) -> Path:
             os.rename(out_path, pdf_path)
 
         return out_path
+    
+def _simplify_pdf_structure(pdf_path: Path) -> Path:
+    """Simplify the PDF structure using qpdf, to make it easier to edit as text."""
+    
+    pdf_path = Path(pdf_path)
+
+    import subprocess
+    cmd = subprocess.run(
+        f'qpdf --qdf --object-streams=disable --replace-input "{pdf_path}"',
+        shell=True,
+        capture_output=True,
+        text=True
+    )
+    if cmd.returncode != 0:
+        raise Exception(f"Error simplifying PDF structure with qpdf: {cmd.stderr}")
+
+    return pdf_path
 
 def _remove_text_with_qpdf(pdf_path, text_to_remove):
     # NOTE: NOT IMPLEMENTED YET; HERE'S THE LOGIC
