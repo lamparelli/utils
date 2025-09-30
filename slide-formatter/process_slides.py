@@ -49,11 +49,9 @@ def main():
 
             print("Removing watermarks...")
             if no_watermark:
-                pdf_utils.remove_watermarks_and_text_with_pikepdf(
+                pdf_utils.remove_watermarks_with_pikepdf(
                     pdf_path=pdf_path, 
-                    inplace=True,
-                    remove_watermarks=True, 
-                    phrase_to_remove=None
+                    inplace=True
                 )
             else:
                 print("Skipped")

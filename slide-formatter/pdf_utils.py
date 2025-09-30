@@ -11,86 +11,24 @@ def add_write_permissions(pdf_path):
     pdf = pikepdf.open(pdf_path, allow_overwriting_input=True)
     pdf.save(pdf_path)
 
-def _normalize_string(s: str) -> str:
-    """Canonicalize a string for comparison: NFKC normalization (folds similar forms); lowercase; trim spaces.
-    This lets you match text even if there are small Unicode quirks.
-    """
-    return unicodedata.normalize("NFKC", s).lower().strip()
-
-def _decode_pdf_text(b: bytes) -> str:
-    """Reads text from an object stream"""
-
-    # Heuristic decode for PDF literal strings (handles BOM UTF-16, fallbacks)
-    if len(b) >= 2 and b[:2] in (b"\xfe\xff", b"\xff\xfe"):
-        try:
-            return unicodedata.normalize("NFKC", b.decode("utf-16"))
-        except Exception:
-            pass
-    for enc in ("utf-8", "latin-1"):
-        try:
-            return unicodedata.normalize("NFKC", b.decode(enc))
-        except Exception:
-            continue
-    return unicodedata.normalize("NFKC", b.decode("latin-1", errors="ignore"))
-
-def _decode_pdf_text_from_TJ(arr: Array) -> str:
-    """Contats the text in the TJ array."""
-
-    chunks = []
-    for item in arr:
-        if isinstance(item, String):
-            chunks.append(_decode_pdf_text(bytes(item)))
-    return "".join(chunks)
-
-def _extract_text_from_object_stream(ops) -> str:
-    """Concatenate shown text in drawing order from a content stream."""
-    out = []
-    for operands, op in ops:
-        if op == Name("/Tj"): # show one string
-            if operands and isinstance(operands[0], String):
-                out.append(_decode_pdf_text(bytes(operands[0])))
-        elif op == Name("/'"): # move to next line & show one string
-            if operands and isinstance(operands[0], String):
-                out.append(_decode_pdf_text(bytes(operands[0])))
-        elif op == Name('/"'): # set word/char spacing & show one string
-            if len(operands) >= 3 and isinstance(operands[2], String):
-                out.append(_decode_pdf_text(bytes(operands[2])))
-        elif op == Name("/TJ"): # show many strings interleaved with kerning adjustments (array)
-            if operands and isinstance(operands[0], Array):
-                out.append(_decode_pdf_text_from_TJ(operands[0]))
-    return "".join(out)
-
-def _is_watermark_present(xobj_dict: Dictionary) -> bool:
-    """Checks if the Form XObject has watermark metadata or characteristics."""
-
-    # Detect Adobe watermark metadata flag
-    piece = xobj_dict.get("/PieceInfo", None)
-    if isinstance(piece, Dictionary):
-        for _, v in piece.items():
-            if isinstance(v, Dictionary) and v.get("/Private", None) == Name("/Watermark"):
-                return True
-    return False
-
-def _delete_from_pdf(stream_obj: Stream):
-    """Deletes the content of a Form XObject by replacing its stream with an empty one."""
-
-    stream_obj.write(b"q Q\n")
-
 def _add_suffix(path: Path, suffix: str) -> Path:
     """Adds a suffix before the file extension."""
     return path.with_name(f"{path.stem}{suffix}.pdf")
 
-def remove_watermarks_and_text_with_pikepdf(pdf_path: Path, inplace: bool, remove_watermarks: bool, phrase_to_remove: str) -> Path:
-    """
-    Returns number of Form XObjects neutralized.
-    """
+def remove_watermarks_with_pikepdf(pdf_path: Path, inplace: bool) -> Path:
+    def _is_watermark_present(xobj_dict: Dictionary) -> bool:
+        """Checks if the Form XObject has watermark metadata or characteristics."""
 
-    # standardizes the text to remove
-    phrase_to_remove_normalized = _normalize_string(phrase_to_remove) if phrase_to_remove else None
-    
+        # Detect Adobe watermark metadata flag
+        piece = xobj_dict.get("/PieceInfo", None)
+        if isinstance(piece, Dictionary):
+            for _, v in piece.items():
+                if isinstance(v, Dictionary) and v.get("/Private", None) == Name("/Watermark"):
+                    return True
+        return False
+
     # counters
     removed_watermarks = 0
-    removed_objects = 0
 
     # setup in/out paths
     if isinstance(pdf_path, str):
@@ -105,26 +43,14 @@ def remove_watermarks_and_text_with_pikepdf(pdf_path: Path, inplace: bool, remov
                 continue
                         
             # if the object is a watermark, remove it
-            if remove_watermarks:
-                if _is_watermark_present(obj):
-                    _delete_from_pdf(obj)
-                    removed_watermarks += 1
-                    continue
-            
-            # else, if a text to remove was specified, see if the object contains the target text to remove
-            if phrase_to_remove_normalized is not None:
-                try:
-                    ops = list(pikepdf.parse_content_stream(obj))
-                    text_concat = _extract_text_from_object_stream(ops)
-                    if text_concat and phrase_to_remove_normalized in _normalize_string(text_concat):
-                        _delete_from_pdf(obj)
-                        removed_objects += 1
-                except Exception:
-                    print(f"Error trying to parse text from {obj}. Skipping.")
-                continue
+            if _is_watermark_present(obj):
+                # replace the item with an empty object
+                obj.write(b"q Q\n")
 
-        print(f"Remove watermarks option: {remove_watermarks}. Removed {removed_watermarks} watermark XObject(s)")
-        print(f"Remove text option: `{phrase_to_remove}` (case insensitive). Removed {removed_objects} XObject(s) containing the target phrase.")
+                removed_watermarks += 1
+                continue
+            
+        print(f"Removed {removed_watermarks} watermark XObject(s)")
         pdf.save(out_path)
 
         if inplace:
