@@ -1,7 +1,9 @@
 import os
 from glob import glob
 from pathlib import Path
-import unicodedata
+import subprocess
+import codecs
+import re
 
 # pip install pikepdf==9.*
 import pikepdf
@@ -64,7 +66,6 @@ def _simplify_pdf_structure(pdf_path: Path) -> Path:
     
     pdf_path = Path(pdf_path)
 
-    import subprocess
     cmd = subprocess.run(
         f'qpdf --qdf --object-streams=disable --replace-input "{pdf_path}"',
         shell=True,
@@ -75,74 +76,72 @@ def _simplify_pdf_structure(pdf_path: Path) -> Path:
         raise Exception(f"Error simplifying PDF structure with qpdf: {cmd.stderr}")
 
     return pdf_path
-
-def _remove_text_with_qpdf(pdf_path, text_to_remove):
-    # NOTE: NOT IMPLEMENTED YET; HERE'S THE LOGIC
     
-    # STEPS:
-    # - Go to qpdf github page (https://github.com/qpdf/qpdf/releases)
-    # - Download the windows installer (qpdf-12.2.0-msvc64.exe)
-    # - Add to user PATH (C:\Program Files\qpdf 12.2.0\bin)
-    # - Simplify the PDF text: qpdf --qdf --object-streams=disable my_pdf.pdf my_pdf_simple.pdf
-    # - Open with a text editor the simplified PDF
-    # - Search of a single word of the text the remove, to find the block with the bad text
-    # - Manually delete the block (or automate the search & delete with a script)
+def _revert_qpdf_simplification(pdf_path: Path) -> Path:    
+    pdf_path = Path(pdf_path)
 
-    # EXAMPLE:
-    # - Text to remove: `Università degli studi Guglielmo Marconi`
-    # - How it appears in the simplified PDF:
-    # ```
-    # %% Original object ID: 126 0
-    # 38 0 obj
-    # <<
-    # /BBox [
-    #     0
-    #     -48
-    #     856.36
-    #     4.80029
-    # ]
-    # /LastModified (D:20240724105529+02'00')
-    # /Matrix [
-    #     1
-    #     0
-    #     0
-    #     1
-    #     0
-    #     0
-    # ]
-    # /OC 146 0 R
-    # /PieceInfo <<
-    #     /ADBE_CompoundType <<
-    #     /DocSettings 147 0 R
-    #     /LastModified (D:20240724105529+02'00')
-    #     /Private /Watermark
-    #     >>
-    # >>
-    # /Resources 149 0 R
-    # /Subtype /Form
-    # /Length 39 0 R
-    # >>
-    # stream
-    # 0 g 0 G 0 i 0 J []0 d 0 j 1 w 10 M 0 Tc 0 Tw 100 Tz 0 TL 0 Tr 0 Ts
-    # BT
-    # /Arial 48 Tf
-    # 0 g
-    # 0 -37.898 Td
-    # (Universit\340 ) Tj
-    # 226.734 0 Td
-    # (degli ) Tj
-    # 114.75 0 Td
-    # (studi ) Tj
-    # 114.727 0 Td
-    # (Guglielmo ) Tj
-    # 229.43 0 Td
-    # (Marconi) Tj
-    # ET
-    # endstream
-    # endobj
-    # ```
+    cmd = subprocess.run(
+        f'qpdf --object-streams=generate --stream-data=compress --linearize --replace-input "{pdf_path}"',
+        shell=True,
+        capture_output=True,
+        text=True
+    )
+    if cmd.returncode != 0:
+        raise Exception(f"Error simplifying PDF structure with qpdf: {cmd.stderr}")
 
-    pass
+    return pdf_path
+
+def remove_text(pdf_path: Path, text_to_remove: str) -> Path:
+    # define in/out paths
+    pdf_path = Path(pdf_path)
+    out_path = _add_suffix(path=pdf_path, suffix='_test')
+
+    # simplify the pdf format with QPDF
+    _simplify_pdf_structure(pdf_path=pdf_path)
+
+    # define how to extract objects from the QPDF representation
+    FIND_OBJECTS_REGEX = re.compile(rb'(?ms)^\s*(\d+)\s+\d+\s+obj\b.*?^\s*endobj\s*')
+    
+    # read input
+    pdf_buffer = pdf_path.read_bytes()
+    
+    # init output
+    out_buffer = []
+    valid_data_start_idx = 0
+
+    # for each object found, check if the object contains the bad phrase; if so, skip it
+    for match in FIND_OBJECTS_REGEX.finditer(pdf_buffer):
+
+        # check if the bad phrase is in the object
+        object = pdf_buffer[match.start():match.end()]
+        try:
+            obj_text = codecs.decode(object, "unicode-escape")
+            obj_contains_bad_text = all(
+                word.lower() in obj_text.lower()
+                for word in text_to_remove.split()
+            )
+            # TODO test why it's not seeing the bad text
+        except Exception:
+            obj_contains_bad_text = False
+
+        # if the bad phrase is in the object, skip it from the output
+        if obj_contains_bad_text:
+            # keep everything up to the start of this bad object
+            out_buffer.append(pdf_buffer[valid_data_start_idx:match.start()])
+            # skip the bad object
+            valid_data_start_idx = match.end()
+
+    # tail (keep everything after the last removed object)
+    out_buffer.append(pdf_buffer[valid_data_start_idx:])
+
+    # join the output portions into a binary var 
+    out_buffer = b"".join(out_buffer)
+
+    # save the output
+    out_path.write_bytes(out_buffer)
+
+    # revert PDF structure to original
+    _revert_qpdf_simplification(pdf_path=out_path)
 
 def split_pages_horizontally(pdf_path: str | Path, inplace: bool) -> Path:
     """
